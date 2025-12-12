@@ -6,8 +6,8 @@ module LispVal (LispVal (..), Eval (..), IFunc (..), EnvCtx (..), showVal) where
 import Control.Exception
 import Control.Monad.Reader (MonadIO, MonadReader, ReaderT (ReaderT))
 import qualified Data.Map as Map
-import qualified Data.Text as T
 import Data.Text (Text)
+import qualified Data.Text as T
 
 data LispVal
   = Atom Text
