@@ -1,16 +1,18 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Eval where
 
-import Control.Monad.Reader (MonadIO, MonadReader, ReaderT (runReaderT), ask)
+import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
+import Control.Monad.Reader (MonadIO, MonadReader, ReaderT (runReaderT), ask, local)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Parser (SExpr (..))
-import Control.Monad.Except (ExceptT, runExceptT, throwError, MonadError)
 import qualified Data.Text.IO as TIO
+import Debug.Trace (trace)
+import Parser (SExpr (..))
 
 data Value
   = VNumber Integer
@@ -24,6 +26,8 @@ data Value
 
 data EvalError
   = UnboundVariable Text
+  | TypeError Text
+  | ArityError Int Int
 
 newtype Eval a = Eval {unEval :: ReaderT EnvCtx (ExceptT EvalError IO) a}
   deriving
@@ -38,7 +42,16 @@ newtype Eval a = Eval {unEval :: ReaderT EnvCtx (ExceptT EvalError IO) a}
 type EnvCtx = Map.Map Text Value
 
 printError :: EvalError -> IO ()
-printError (UnboundVariable x) = TIO.putStrLn ("unbound variable: " <> x)
+printError err =
+  TIO.putStrLn $
+    case err of
+      UnboundVariable s -> "unbound variable: " <> s
+      TypeError m -> "type error: " <> m
+      ArityError expected got ->
+        "arity mismatch: expected "
+          <> T.show expected
+          <> " argument(s), but got "
+          <> T.show got
 
 runEval :: EnvCtx -> Eval a -> IO (Either EvalError a)
 runEval env ev = runExceptT (runReaderT (unEval ev) env)
@@ -69,14 +82,53 @@ datumToValue (PDotted xs t) =
 
 eval :: SExpr -> Eval Value
 eval (PList []) = pure VNil
-eval (PList [PSymbol "quote", x]) = pure $ datumToValue x
 eval (PSymbol s) = getVar s
-eval (PList [PSymbol "let", PList pairs, expr]) = 
+eval (PList [PSymbol "quote", x]) = pure $ datumToValue x
+eval (PList [PSymbol "lambda", PList params, body]) = evalLambda params body
+eval (PList [PSymbol "let", PList bindings, body]) = evalLet bindings body
+eval (PList (f : args)) = do
+  func <- eval f
+  values <- mapM eval args
+  apply func values
+eval x = pure $ datumToValue x
+
+evalLet :: [SExpr] -> SExpr -> Eval Value
+evalLet bindings body = do
+  pairs <- mapM parseBinding bindings
+  let (names, exprs) = unzip pairs
+  eval $
+    PList (PList [PSymbol "lambda", PList (map PSymbol names), body] : exprs)
+
+parseBinding :: SExpr -> Eval (Text, SExpr)
+parseBinding (PList [PSymbol name, expr]) = pure (name, expr)
+parseBinding bad =
+  throwError
+    ( TypeError
+        ("invalid let binding: " <> T.show bad)
+    )
+
+evalLambda :: [SExpr] -> SExpr -> Eval Value
+evalLambda params body = do
+  names <- mapM getParam params
+  env <- ask
+  pure (VFunc names body env)
+
+getParam :: SExpr -> Eval Text
+getParam (PSymbol s) = pure s
+getParam bad = throwError (TypeError ("invalid parameter: " <> T.show bad))
+
+apply :: Value -> [Value] -> Eval Value
+apply (VPrim f) args = f args
+apply (VFunc params body closureEnv) args
+  | length params /= length args =
+      throwError $ ArityError (length params) (length args)
+  | otherwise = do
+      let newEnv = Map.union (Map.fromList (zip params args)) closureEnv
+      local (const newEnv) $ eval body
 
 getVar :: Text -> Eval Value
 getVar s = do
   env <- ask
   case Map.lookup s env of
     Just x -> pure x
-    Nothing -> throwError (UnboundVariable s)
-
+    Nothing -> throwError $ UnboundVariable s
