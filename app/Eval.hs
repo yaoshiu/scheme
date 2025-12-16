@@ -28,6 +28,7 @@ data EvalError
   = UnboundVariable Text
   | TypeError Text
   | ArityError Int Int
+  | SyntaxError Text
 
 newtype Eval a = Eval {unEval :: ReaderT EnvCtx (ExceptT EvalError IO) a}
   deriving
@@ -52,9 +53,15 @@ printError err =
           <> T.show expected
           <> " argument(s), but got "
           <> T.show got
+      SyntaxError m -> "syntax error: " <> m
 
 runEval :: EnvCtx -> Eval a -> IO (Either EvalError a)
 runEval env ev = runExceptT (runReaderT (unEval ev) env)
+
+showSExpr :: SExpr -> Text
+showSExpr (PSymbol s) = s
+showSExpr (PList xs) = "(" <> T.unwords (map showSExpr xs) <> ")"
+showSExpr (PDotted xs t) = "(" <> T.unwords (map showSExpr xs) <> "." <> showSExpr t <> ")"
 
 showVal :: Value -> Text
 showVal (VNumber n) = T.pack $ show n
@@ -102,10 +109,7 @@ evalLet bindings body = do
 parseBinding :: SExpr -> Eval (Text, SExpr)
 parseBinding (PList [PSymbol name, expr]) = pure (name, expr)
 parseBinding bad =
-  throwError
-    ( TypeError
-        ("invalid let binding: " <> T.show bad)
-    )
+  throwError $ SyntaxError $ "invalid let binding: " <> showSExpr bad
 
 evalLambda :: [SExpr] -> SExpr -> Eval Value
 evalLambda params body = do

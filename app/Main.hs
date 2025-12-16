@@ -6,7 +6,7 @@ import Control.Monad (unless)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Parser
-import System.IO (hFlush, stdout)
+import System.IO (hFlush, stdout, isEOF)
 import Text.Megaparsec (parse)
 import Text.Megaparsec.Error (errorBundlePretty)
 import Eval (eval, showVal, EnvCtx, runEval, printError)
@@ -16,16 +16,18 @@ repl :: EnvCtx -> IO ()
 repl env = do
   putStr "> "
   hFlush stdout
-  line <- TIO.getLine
-  unless (T.null line) $ do
-    case parse single "<repl>" line of
-      Left err -> putStrLn (errorBundlePretty err)
-      Right ast -> do
-        result <- runEval env (eval ast)
-        case result of
-          Left err -> printError err
-          Right v -> TIO.putStrLn $ showVal v
-        repl env
+  eof <- isEOF
+  unless eof $ do
+    line <- TIO.getLine
+    unless (T.null line) $ do
+      case parse single "<repl>" line of
+        Left err -> putStrLn (errorBundlePretty err)
+        Right ast -> do
+          result <- runEval env (eval ast)
+          case result of
+            Left err -> printError err
+            Right v -> TIO.putStrLn $ showVal v
+    repl env
 
 main :: IO ()
 main = repl $ Map.fromList []
