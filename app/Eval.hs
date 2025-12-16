@@ -1,17 +1,19 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Eval where
 
-import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
-import Control.Monad.Reader (MonadIO, MonadReader, ReaderT (runReaderT), ask, local)
+import Control.Applicative ((<|>))
+import Control.Monad.Except (ExceptT, MonadError, catchError, runExceptT, throwError)
+import Control.Monad.State (MonadState, StateT, evalStateT, get, liftIO, put)
+import Control.Monad.State.Lazy (MonadIO)
+import Data.IORef (IORef, newIORef, readIORef)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Debug.Trace (trace)
 import Parser (SExpr (..))
 
 data Value
@@ -20,7 +22,7 @@ data Value
   | VString Text
   | VSymbol Text
   | VPrim ([Value] -> Eval Value)
-  | VFunc [Text] SExpr EnvCtx
+  | VFunc [Text] SExpr Env
   | VPair Value Value
   | VNil
 
@@ -30,17 +32,21 @@ data EvalError
   | ArityError Int Int
   | SyntaxError Text
 
-newtype Eval a = Eval {unEval :: ReaderT EnvCtx (ExceptT EvalError IO) a}
+newtype Eval a = Eval {unEval :: StateT Env (ExceptT EvalError IO) a}
   deriving
     ( Monad,
       Functor,
       Applicative,
-      MonadReader EnvCtx,
+      MonadState Env,
       MonadIO,
       MonadError EvalError
     )
 
-type EnvCtx = Map.Map Text Value
+type Cell = IORef Value
+
+type Frame = Map.Map Text Cell
+
+data Env = Env {parent :: Maybe Env, bindings :: Frame}
 
 printError :: EvalError -> IO ()
 printError err =
@@ -55,13 +61,17 @@ printError err =
           <> T.show got
       SyntaxError m -> "syntax error: " <> m
 
-runEval :: EnvCtx -> Eval a -> IO (Either EvalError a)
-runEval env ev = runExceptT (runReaderT (unEval ev) env)
+runEval :: Env -> Eval a -> IO (Either EvalError a)
+runEval env ev = runExceptT (evalStateT (unEval ev) env)
 
 showSExpr :: SExpr -> Text
-showSExpr (PSymbol s) = s
-showSExpr (PList xs) = "(" <> T.unwords (map showSExpr xs) <> ")"
+showSExpr (PBoolean False) = "#f"
+showSExpr (PBoolean True) = "#t"
 showSExpr (PDotted xs t) = "(" <> T.unwords (map showSExpr xs) <> "." <> showSExpr t <> ")"
+showSExpr (PList xs) = "(" <> T.unwords (map showSExpr xs) <> ")"
+showSExpr (PNumber n) = T.show n
+showSExpr (PString s) = "\"" <> s <> "\""
+showSExpr (PSymbol s) = s
 
 showVal :: Value -> Text
 showVal (VNumber n) = T.pack $ show n
@@ -114,7 +124,7 @@ parseBinding bad =
 evalLambda :: [SExpr] -> SExpr -> Eval Value
 evalLambda params body = do
   names <- mapM getParam params
-  env <- ask
+  env <- get
   pure (VFunc names body env)
 
 getParam :: SExpr -> Eval Text
@@ -123,16 +133,35 @@ getParam bad = throwError (TypeError ("invalid parameter: " <> T.show bad))
 
 apply :: Value -> [Value] -> Eval Value
 apply (VPrim f) args = f args
-apply (VFunc params body closureEnv) args
+apply (VFunc params body env) args
   | length params /= length args =
       throwError $ ArityError (length params) (length args)
   | otherwise = do
-      let newEnv = Map.union (Map.fromList (zip params args)) closureEnv
-      local (const newEnv) $ eval body
+      args' <- mapM (liftIO . newIORef) args
+      let env' =
+            Env
+              { parent = Just env,
+                bindings = Map.fromList $ zip params args'
+              }
+      oldEnv <- get
+      put env'
+      result <-
+        eval body `catchError` \e -> do
+          put oldEnv
+          throwError e
+      put oldEnv
+      pure result
+apply v _ = throwError $ TypeError $ "not a function: " <> showVal v
 
 getVar :: Text -> Eval Value
 getVar s = do
-  env <- ask
-  case Map.lookup s env of
-    Just x -> pure x
-    Nothing -> throwError $ UnboundVariable s
+  env <- get
+  maybe
+    (throwError $ UnboundVariable s)
+    (liftIO . readIORef)
+    (lookFor s env)
+  where
+    lookFor :: Text -> Env -> Maybe Cell
+    lookFor s Env {parent, bindings} =
+      Map.lookup s bindings
+        <|> (parent >>= lookFor s)

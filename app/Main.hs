@@ -9,10 +9,10 @@ import Parser
 import System.IO (hFlush, stdout, isEOF)
 import Text.Megaparsec (parse)
 import Text.Megaparsec.Error (errorBundlePretty)
-import Eval (eval, showVal, EnvCtx, runEval, printError)
+import Eval (eval, showVal, runEval, printError, Env (..))
 import qualified Data.Map as Map
 
-repl :: EnvCtx -> IO ()
+repl :: Env -> IO ()
 repl env = do
   putStr "> "
   hFlush stdout
@@ -30,4 +30,4 @@ repl env = do
     repl env
 
 main :: IO ()
-main = repl $ Map.fromList []
+main = repl $ Env { parent = Nothing, bindings = Map.fromList [] }
