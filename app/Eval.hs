@@ -31,6 +31,12 @@ data EvalError
   | ArityError Int Int
   | SyntaxError Text
 
+type Cell = IORef Value
+
+type Frame = IORef (Map.Map Text Cell)
+
+data Env = Env {parent :: Maybe Env, bindings :: Frame}
+
 newtype Eval a = Eval {unEval :: ReaderT Env (ExceptT EvalError IO) a}
   deriving
     ( Monad,
@@ -40,12 +46,6 @@ newtype Eval a = Eval {unEval :: ReaderT Env (ExceptT EvalError IO) a}
       MonadIO,
       MonadError EvalError
     )
-
-type Cell = IORef Value
-
-type Frame = IORef (Map.Map Text Cell)
-
-data Env = Env {parent :: Maybe Env, bindings :: Frame}
 
 printError :: EvalError -> IO ()
 printError err =
@@ -86,7 +86,7 @@ showVal (VPair l r) =
       showTail (VPair left right) = " " <> showVal left <> showTail right
       showTail right = " . " <> showVal right
    in "(" <> showVal l <> showTail r <> ")"
-showVal (VVoid) = "#<void>"
+showVal VVoid = "#<void>"
 
 datumToValue :: SExpr -> Value
 datumToValue (PNumber n) = VNumber n
@@ -103,8 +103,8 @@ eval (PSymbol s) = getVar s
 eval (PList [PSymbol "quote", x]) = pure $ datumToValue x
 eval (PList [PSymbol "lambda", PList params, body]) = evalLambda params body
 eval (PList [PSymbol "let", PList bindings, body]) = evalLet bindings body
-eval (PList [PSymbol "define", name, value]) = evalDefine name value
 eval (PList (PSymbol "begin" : body)) = evalBegin body
+eval (PList [PSymbol "define", PSymbol name, expr]) = eval expr >>= evalDefine name
 eval (PList (f : args)) = do
   func <- eval f
   values <- mapM eval args
@@ -114,15 +114,12 @@ eval x = pure $ datumToValue x
 evalBegin :: [SExpr] -> Eval Value
 evalBegin body = foldM (const eval) VVoid body
 
-evalDefine :: SExpr -> SExpr -> Eval Value
-evalDefine (PSymbol name) value = do
-  val <- eval value
-  cell <- liftIO $ newIORef val
+evalDefine :: Text -> Value -> Eval Value
+evalDefine name val = do
   Env {bindings} <- ask
+  cell <- liftIO $ newIORef val
   liftIO $ modifyIORef' bindings $ Map.insert name cell
   pure VVoid
-evalDefine bad1 bad2 =
-  throwError $ SyntaxError $ "invalid define: " <> showSExpr bad1 <> " " <> showSExpr bad2
 
 evalLet :: [SExpr] -> SExpr -> Eval Value
 evalLet bindings body = do
@@ -153,23 +150,19 @@ apply (VFunc params body env) args
       throwError $ ArityError (length params) (length args)
   | otherwise = do
       args' <- mapM (liftIO . newIORef) args
-      bindings <- liftIO . newIORef $ Map.fromList $ zip params args'
-      let env' =
-            Env
-              { parent = Just env,
-                bindings = bindings
-              }
+      bindings <- liftIO $ newIORef $ Map.fromList $ zip params args'
+      let env' = Env {parent = Just env, bindings }
       local (const env') $ eval body
 apply v _ = throwError $ TypeError $ "not a function: " <> showVal v
 
 getVar :: Text -> Eval Value
 getVar s = do
   env <- ask
-  res <- (liftIO $ lookFor s env)
+  cell <- liftIO $ lookFor s env
   maybe
     (throwError $ UnboundVariable s)
     (liftIO . readIORef)
-    res
+    cell
   where
     lookFor :: Text -> Env -> IO (Maybe Cell)
     lookFor name Env {parent, bindings} = do

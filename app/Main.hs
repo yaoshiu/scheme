@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NamedFieldPuns #-}
 
 module Main (main) where
 
@@ -33,5 +34,5 @@ repl env = do
 
 main :: IO ()
 main = do
-  env <- newIORef $ Map.fromList []
-  repl $ Env { parent = Nothing, bindings = env }
+  bindings <- newIORef $ Map.fromList []
+  repl $ Env { parent = Nothing, bindings }
