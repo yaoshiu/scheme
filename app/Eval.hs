@@ -104,7 +104,7 @@ eval (PList [PSymbol "quote", x]) = pure $ datumToValue x
 eval (PList [PSymbol "lambda", PList params, body]) = evalLambda params body
 eval (PList [PSymbol "let", PList bindings, body]) = evalLet bindings body
 eval (PList (PSymbol "begin" : body)) = evalBegin body
-eval (PList [PSymbol "define", PSymbol name, expr]) = eval expr >>= evalDefine name
+eval (PList [PSymbol "define!", PSymbol name, expr]) = eval expr >>= evalDefine name
 eval (PList (f : args)) = do
   func <- eval f
   values <- mapM eval args
