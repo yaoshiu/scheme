@@ -108,11 +108,19 @@ eval (PList [PSymbol "define!", PSymbol name, expr]) = eval expr >>= evalDefine 
 eval (PList (PSymbol "define!" : PList (name : params) : body)) =
   eval $ PList [PSymbol "define!", name, PList (PSymbol "lambda" : PList params : body)]
 eval (PList [PSymbol "set!", PSymbol name, expr]) = eval expr >>= evalSet name
+eval (PList [PSymbol "if", pre, con, alt]) = evalIf pre con alt
 eval (PList (f : args)) = do
   func <- eval f
   values <- mapM eval args
   apply func values
 eval x = pure $ datumToValue x
+
+evalIf :: SExpr -> SExpr -> SExpr -> Eval Value
+evalIf pre con alt = do
+  res <- eval pre
+  case res of
+    VBoolean False -> eval alt
+    _ -> eval con
 
 evalSet :: Text -> Value -> Eval Value
 evalSet name val = do
