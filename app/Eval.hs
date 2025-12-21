@@ -29,6 +29,7 @@ data EvalError
   | TypeError Text
   | ArityError Int Int
   | SyntaxError Text
+  | NumericError Text
 
 type Cell = IORef Value
 
@@ -58,6 +59,7 @@ printError err =
           <> " argument(s), but got "
           <> T.show got
       SyntaxError m -> "syntax error: " <> m
+      NumericError m -> "numeric error: " <> m
 
 runEval :: Env -> Eval a -> IO (Either EvalError a)
 runEval env ev = runExceptT (runReaderT (unEval ev) env)
@@ -99,14 +101,18 @@ eval :: SExpr -> Eval Value
 eval (PList []) = pure VNil
 eval (PSymbol s) = getVar s >>= liftIO . readIORef
 eval (PList [PSymbol "quote", x]) = pure $ datumToValue x
-eval (PList [PSymbol "lambda", PList params, body]) = evalLambda params body
-eval (PList (PSymbol "lambda" : PList params : body)) =
-  eval $ PList [PSymbol "lambda", PList params, PList (PSymbol "begin" : body)]
-eval (PList [PSymbol "let", PList bindings, body]) = evalLet bindings body
-eval (PList (PSymbol "begin" : body)) = evalBegin body
+eval (PList [PSymbol "lambda", PList params, expr]) = evalLambda params expr
+eval (PList [PSymbol "let", PList bindings, expr]) = evalLet bindings expr
+eval (PList (PSymbol "do" : body)) = evalDo body
 eval (PList [PSymbol "define!", PSymbol name, expr]) = eval expr >>= evalDefine name
-eval (PList (PSymbol "define!" : PList (name : params) : body)) =
-  eval $ PList [PSymbol "define!", name, PList (PSymbol "lambda" : PList params : body)]
+eval (PList [PSymbol "define!", PList (PSymbol name : params), expr]) =
+  eval $
+    PList
+      [ PSymbol "define!",
+        PSymbol name,
+        PList
+          [PSymbol "lambda", PList params, expr]
+      ]
 eval (PList [PSymbol "set!", PSymbol name, expr]) = eval expr >>= evalSet name
 eval (PList [PSymbol "if", pre, con, alt]) = evalIf pre con alt
 eval (PList (f : args)) = do
@@ -128,8 +134,8 @@ evalSet name val = do
   liftIO $ modifyIORef' cell $ const val
   pure val
 
-evalBegin :: [SExpr] -> Eval Value
-evalBegin body = foldM (const eval) VNil body
+evalDo :: [SExpr] -> Eval Value
+evalDo body = foldM (const eval) VNil body
 
 evalDefine :: Text -> Value -> Eval Value
 evalDefine name val = do
@@ -139,11 +145,11 @@ evalDefine name val = do
   pure val
 
 evalLet :: [SExpr] -> SExpr -> Eval Value
-evalLet bindings body = do
+evalLet bindings expr = do
   pairs <- mapM parseBinding bindings
-  let (names, exprs) = unzip pairs
+  let (names, vals) = unzip pairs
   eval $
-    PList (PList [PSymbol "lambda", PList (map PSymbol names), body] : exprs)
+    PList (PList [PSymbol "lambda", PList (map PSymbol names), expr] : vals)
 
 parseBinding :: SExpr -> Eval (Text, SExpr)
 parseBinding (PList [PSymbol name, expr]) = pure (name, expr)
@@ -151,10 +157,10 @@ parseBinding bad =
   throwError $ SyntaxError $ "invalid let binding: " <> showSExpr bad
 
 evalLambda :: [SExpr] -> SExpr -> Eval Value
-evalLambda params body = do
+evalLambda params expr = do
   names <- mapM getParam params
   env <- ask
-  pure (VFunc names body env)
+  pure (VFunc names expr env)
 
 getParam :: SExpr -> Eval Text
 getParam (PSymbol s) = pure s
@@ -162,14 +168,14 @@ getParam bad = throwError $ SyntaxError $ "invalid parameter: " <> showSExpr bad
 
 apply :: Value -> [Value] -> Eval Value
 apply (VPrim f) args = f args
-apply (VFunc params body env) args
+apply (VFunc params expr env) args
   | length params /= length args =
       throwError $ ArityError (length params) (length args)
   | otherwise = do
       args' <- mapM (liftIO . newIORef) args
       bindings <- liftIO $ newIORef $ Map.fromList $ zip params args'
       let env' = Env {parent = Just env, bindings}
-      local (const env') $ eval body
+      local (const env') $ eval expr
 apply v _ = throwError $ TypeError $ "not a function: " <> showVal v
 
 getVar :: Text -> Eval Cell

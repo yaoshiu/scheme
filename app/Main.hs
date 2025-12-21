@@ -13,6 +13,7 @@ import Text.Megaparsec.Error (errorBundlePretty)
 import Eval (eval, showVal, runEval, printError, Env (..))
 import qualified Data.Map as Map
 import Data.IORef (newIORef)
+import Prim (primEnv)
 
 repl :: Env -> IO ()
 repl env = do
@@ -33,5 +34,6 @@ repl env = do
 
 main :: IO ()
 main = do
+  prims <- primEnv
   bindings <- newIORef $ Map.fromList []
-  repl $ Env { parent = Nothing, bindings }
+  repl $ Env { parent = Just prims, bindings }
