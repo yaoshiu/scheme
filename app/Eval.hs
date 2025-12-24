@@ -5,6 +5,7 @@
 module Eval where
 
 import Control.Monad (foldM)
+import Control.Monad.Cont (ContT (..), MonadCont)
 import Control.Monad.Except (ExceptT, MonadError (..), runExceptT)
 import Control.Monad.Reader (MonadIO (..), MonadReader (..), ReaderT (..))
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
@@ -31,20 +32,23 @@ data EvalError
   | SyntaxError Text
   | NumericError Text
 
+type EvalResult = Either EvalError Value
+
 type Cell = IORef Value
 
 type Frame = IORef (Map.Map Text Cell)
 
 data Env = Env {parent :: Maybe Env, bindings :: Frame}
 
-newtype Eval a = Eval {unEval :: ReaderT Env (ExceptT EvalError IO) a}
+newtype Eval a = Eval {unEval :: ReaderT Env (ExceptT EvalError (ContT EvalResult IO)) a}
   deriving
     ( Monad,
       Functor,
       Applicative,
       MonadReader Env,
       MonadIO,
-      MonadError EvalError
+      MonadError EvalError,
+      MonadCont
     )
 
 printError :: EvalError -> IO ()
@@ -61,8 +65,11 @@ printError err =
       SyntaxError m -> "syntax error: " <> m
       NumericError m -> "numeric error: " <> m
 
-runEval :: Env -> Eval a -> IO (Either EvalError a)
-runEval env ev = runExceptT (runReaderT (unEval ev) env)
+runEval :: Env -> Eval Value -> IO (Either EvalError Value)
+runEval env ev =
+  runContT
+    (runExceptT (runReaderT (unEval ev) env))
+    pure
 
 showSExpr :: SExpr -> Text
 showSExpr (PBoolean False) = "#f"

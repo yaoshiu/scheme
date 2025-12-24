@@ -103,12 +103,24 @@ isEq [a, b] = pure $ VBoolean $ case (a, b) of
   _ -> False
 isEq args = arityError 2 args
 
+mkBinaryNumOp :: (Integer -> Integer -> Integer) -> [Value] -> Eval Value
+mkBinaryNumOp op [v1, v2] = do
+  n1 <- unpackNum v1
+  n2 <- unpackNum v2
+  if n2 == 0
+    then throwError $ NumericError "division by zero"
+    else pure $ VNumber $ n1 `op` n2
+mkBinaryNumOp _ args = arityError 2 args
+
 primitives :: [(Text, [Value] -> Eval Value)]
 primitives =
   [ ("+", mkNumOp 0 (+)),
     ("-", mkNumOp 0 (-)),
     ("*", mkNumOp 1 (*)),
     ("/", divOp),
+    ("quotient", mkBinaryNumOp quot),
+    ("remainter", mkBinaryNumOp rem),
+    ("modulo", mkBinaryNumOp mod),
     ("=", mkCmpOp (==)),
     ("<", mkCmpOp (<)),
     ("cons", cons),
