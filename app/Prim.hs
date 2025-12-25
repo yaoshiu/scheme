@@ -115,11 +115,8 @@ mkBinaryNumOp _ args = arityError 2 args
 
 callCC' :: [Value] -> Eval Value
 callCC' [func@(VFunc _ _ _)] = do
-  callCC $ \exit -> do
-    let k args = case args of
-          [v] -> exit v
-          _ -> arityError 1 args
-    apply func [VPrim k]
+  callCC $ \k -> do
+    apply func [VCont k]
 callCC' [v] = throwError $ TypeError $ "expected a function, got: " <> showVal v
 callCC' args = arityError 1 args
 

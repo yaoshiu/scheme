@@ -2,7 +2,18 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Eval where
+module Eval
+  ( Value (..),
+    EvalError (..),
+    Env (..),
+    Eval (..),
+    eval,
+    runEval,
+    apply,
+    showVal,
+    printError,
+  )
+where
 
 import Control.Monad (foldM)
 import Control.Monad.Cont (ContT (..), MonadCont)
@@ -21,6 +32,7 @@ data Value
   | VString Text
   | VSymbol Text
   | VPrim ([Value] -> Eval Value)
+  | VCont (Value -> Eval Value)
   | VFunc [Text] SExpr Env
   | VPair Value Value
   | VNil
@@ -94,6 +106,7 @@ showVal (VPair l r) =
       showTail (VPair left right) = " " <> showVal left <> showTail right
       showTail right = " . " <> showVal right
    in "(" <> showVal l <> showTail r <> ")"
+showVal (VCont _) = "#<continuation>"
 
 datumToValue :: SExpr -> Value
 datumToValue (PNumber n) = VNumber n
@@ -117,8 +130,7 @@ eval (PList [PSymbol "define!", PList (PSymbol name : params), expr]) =
     PList
       [ PSymbol "define!",
         PSymbol name,
-        PList
-          [PSymbol "lambda", PList params, expr]
+        PList [PSymbol "lambda", PList params, expr]
       ]
 eval (PList [PSymbol "set!", PSymbol name, expr]) = eval expr >>= evalSet name
 eval (PList [PSymbol "if", pre, con, alt]) = evalIf pre con alt
@@ -183,6 +195,8 @@ apply (VFunc params expr env) args
       bindings <- liftIO $ newIORef $ Map.fromList $ zip params args'
       let env' = Env {parent = Just env, bindings}
       local (const env') $ eval expr
+apply (VCont k) [val] = k val
+apply (VCont _) args = throwError $ ArityError 1 $ length args
 apply v _ = throwError $ TypeError $ "not a function: " <> showVal v
 
 getVar :: Text -> Eval Cell
