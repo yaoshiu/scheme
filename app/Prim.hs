@@ -3,14 +3,14 @@
 
 module Prim where
 
+import Control.Monad.Cont (callCC)
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader (liftIO)
 import Data.IORef (newIORef)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text.IO as TIO
-import Eval (Env (..), Eval, EvalError (..), Value (..), showVal, apply, renderVal)
-import Control.Monad.Cont (callCC)
+import Eval (Env (..), Eval, EvalError (..), Value (..), apply, renderVal, showVal)
 
 unpackNum :: Value -> Eval Integer
 unpackNum (VNumber n) = pure n
@@ -117,7 +117,7 @@ mkBinaryNumOp op [v1, v2] = do
 mkBinaryNumOp _ args = arityError 2 args
 
 callCC' :: [Value] -> Eval Value
-callCC' [func@(VFunc _ _ _)] = do
+callCC' [func@(VFunc {})] = do
   callCC $ \k -> do
     apply func [VCont k]
 callCC' [v] = throwError $ TypeError $ "expected a function, got: " <> showVal v

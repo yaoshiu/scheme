@@ -37,6 +37,7 @@ data Value
   | VFunc [Text] SExpr Env
   | VPair Value Value
   | VNil
+  | VMacro Text SExpr Env
 
 data EvalError
   = UnboundVariable Text
@@ -101,14 +102,15 @@ renderVal _ VNil = "()"
 renderVal _ (VBoolean True) = "#t"
 renderVal _ (VBoolean False) = "#f"
 renderVal _ (VSymbol s) = s
-renderVal _ (VPrim _) = "#<primitive>"
-renderVal _ (VFunc _ _ _) = "#<procedure>"
-renderVal _ (VCont _) = "#<continuation>"
+renderVal _ (VPrim {}) = "#<primitive>"
+renderVal _ (VFunc {}) = "#<procedure>"
+renderVal _ (VCont {}) = "#<continuation>"
 renderVal r (VPair l r') =
   let showTail VNil = ""
       showTail (VPair left right) = " " <> renderVal r left <> showTail right
       showTail right = " . " <> renderVal r right
    in "(" <> renderVal r l <> showTail r' <> ")"
+renderVal _ (VMacro {}) = "#<macro>"
 
 showVal :: Value -> Text
 showVal = renderVal True
@@ -139,11 +141,52 @@ eval (PList [PSymbol "define!", PList (PSymbol name : params), expr]) =
       ]
 eval (PList [PSymbol "set!", PSymbol name, expr]) = eval expr >>= evalSet name
 eval (PList [PSymbol "if", pre, con, alt]) = evalIf pre con alt
-eval (PList (f : args)) = do
-  func <- eval f
-  values <- mapM eval args
-  apply func values
+eval (PList [PSymbol "macro", PSymbol param, expr]) = evalMacro param expr
+eval (PList (fExpr : args)) = do
+  fVal <- eval fExpr
+  case fVal of
+    VMacro {} -> do
+      let args' = datumToValue (PList args)
+      expanded <- applyMacro fVal args'
+      eval (valueToDatum expanded)
+    _ -> do
+      values <- mapM eval args
+      apply fVal values
 eval x = pure $ datumToValue x
+
+applyMacro :: Value -> Value -> Eval Value
+applyMacro (VMacro param expr env) args = do
+  cell <- liftIO $ newIORef args
+  frame <- liftIO $ newIORef $ Map.fromList [(param, cell)]
+  let env' = Env (Just env) frame
+  local (const env') $ eval expr
+applyMacro _ _ = throwError $ SyntaxError "invalid macro application"
+
+valueToDatum :: Value -> SExpr
+valueToDatum (VNumber n) = PNumber n
+valueToDatum (VBoolean b) = PBoolean b
+valueToDatum (VString s) = PString s
+valueToDatum (VSymbol s) = PSymbol s
+valueToDatum VNil = PList []
+valueToDatum (VPair l r) =
+  let flatten (VPair h t) = h : flatten t
+      flatten VNil = []
+      flatten lastVal = [lastVal]
+      isProper VNil = True
+      isProper (VPair _ t) = isProper t
+      isProper _ = False
+   in if isProper (VPair l r)
+        then PList (map valueToDatum (flatten (VPair l r)))
+        else
+          let xs = flatten (VPair l r)
+           in PDotted (map valueToDatum (init xs)) (valueToDatum (last xs))
+valueToDatum (VFunc {}) = error "Macros cannot return functions"
+valueToDatum (VPrim {}) = error "Macros cannot return primitives"
+valueToDatum (VCont {}) = error "Macros cannot return continuations"
+valueToDatum (VMacro {}) = error "Macros cannot return macros"
+
+evalMacro :: Text -> SExpr -> Eval Value
+evalMacro param expr = ask >>= pure . VMacro param expr
 
 evalIf :: SExpr -> SExpr -> SExpr -> Eval Value
 evalIf pre con alt = do
@@ -198,7 +241,7 @@ apply (VFunc params expr env) args
   | otherwise = do
       args' <- mapM (liftIO . newIORef) args
       bindings <- liftIO $ newIORef $ Map.fromList $ zip params args'
-      let env' = Env {parent = Just env, bindings}
+      let env' = Env (Just env) bindings
       local (const env') $ eval expr
 apply (VCont k) [val] = k val
 apply (VCont _) args = throwError $ ArityError 1 $ length args
