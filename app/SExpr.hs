@@ -2,10 +2,10 @@
 
 module SExpr
   ( SExpr (..),
-    IFunc (..),
     EvalError (..),
     Env (..),
     Eval (..),
+    Operative (..),
     Cell,
   )
 where
@@ -24,19 +24,18 @@ data SExpr
   | SBoolean Bool
   | SPair SExpr SExpr
   | SNil
-  | SProc IFunc
-  | SMacro IFunc
-  deriving (Show, Eq, Ord)
+  | SOperative Operative
+  deriving (Eq, Ord)
 
-newtype IFunc = IFunc {fn :: SExpr -> Eval SExpr}
+newtype Operative = Operative {op :: SExpr -> Eval SExpr}
 
-instance Eq IFunc where
+instance Eq Operative where
   _ == _ = False
 
-instance Ord IFunc where
+instance Ord Operative where
   _ <= _ = False
 
-instance Show IFunc where
+instance Show Operative where
   show _ = error "cannot show a function"
 
 data EvalError
