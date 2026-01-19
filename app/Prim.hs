@@ -46,7 +46,8 @@ fold :: [SExpr] -> SExpr
 fold = foldr SPair SNil
 
 bindAndEval :: SExpr -> SExpr -> SExpr -> Eval SExpr
-bindAndEval params args expr =
+bindAndEval params args expr = do
+  env <- ask
   dispatch params $
     fold
       [ fold
@@ -62,7 +63,7 @@ bindAndEval params args expr =
         opOnPair $ \p ps ->
           dispatch args $
             fold
-              [ mkOp $ \as -> bindAndEval ps as expr,
+              [ mkOp $ \as -> local (const env) $ bindAndEval params as expr,
                 opOnPair $ \a as -> do
                   _ <-
                     dispatch p $
