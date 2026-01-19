@@ -6,7 +6,8 @@ module SExpr
     Eval (..),
     Op (..),
     Cell,
-    unicodeSize
+    unicodeSize,
+    quote
   )
 where
 
@@ -64,3 +65,9 @@ newtype Eval a = Eval
       MonadIO,
       MonadCont
     )
+
+quote :: SExpr
+quote = SOp $ Op $ \ast -> pure $ case ast of
+    SNil -> quote
+    SPair l _ -> l
+    _ -> ast

@@ -9,7 +9,7 @@ import Data.Void (Void)
 import Text.Megaparsec (Parsec, between, eof, manyTill, takeWhile1P, try, (<|>), MonadParsec (..))
 import Text.Megaparsec.Char (char, space1, string)
 import qualified Text.Megaparsec.Char.Lexer as L
-import SExpr (SExpr (..))
+import SExpr (SExpr (..), quote)
 
 type Parser = Parsec Void Text
 
@@ -48,7 +48,7 @@ quoted :: Parser SExpr
 quoted = do
   _ <- lexeme (char '\'')
   e <- expr
-  pure $ SPair (SSym "quote") $ SPair e SNil
+  pure $ SPair quote $ SPair e SNil
 
 characterP :: Parser SExpr
 characterP = lexeme $ do
@@ -63,7 +63,8 @@ stringP :: Parser SExpr
 stringP = lexeme $ do
   _ <- char '"'
   chars <- manyTill L.charLiteral (char '"')
-  pure $ foldr (SPair . SChar) SNil chars
+  let str = foldr (SPair . SChar) SNil chars 
+  pure $ SPair quote $ SPair str SNil
 
 atom :: Parser SExpr
 atom = try number <|> characterP <|> stringP <|> quoted <|> symbolP

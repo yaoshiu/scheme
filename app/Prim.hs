@@ -8,7 +8,7 @@ import Data.IORef (newIORef)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import Eval (currying, dispatch, eval, ternary, unary)
-import SExpr (Env (..), Eval, Op (..), SExpr (..))
+import SExpr (Env (..), Eval, Op (..), SExpr (..), quote)
 
 mkOp :: (SExpr -> Eval SExpr) -> SExpr
 mkOp = SOp . Op
@@ -55,7 +55,7 @@ bindAndEval params args expr = do
               _ <-
                 dispatch params $
                   fold
-                    [ fold [mkOp $ currying 1 $ unary $ \ast -> pure ast, args],
+                    [ fold [quote, args],
                       SNil
                     ]
               eval expr
@@ -69,7 +69,7 @@ bindAndEval params args expr = do
                     dispatch p $
                       fold
                         [ fold
-                            [mkOp $ currying 1 $ unary $ \ast -> pure ast, a]
+                            [quote, a]
                         ]
                   bindAndEval ps as expr
               ]
@@ -108,7 +108,7 @@ cdr pair =
 
 primitives :: [(Text, SExpr)]
 primitives =
-  [ ("quote", mkOp $ currying 1 $ unary $ \ast -> pure ast),
+  [ ("quote", quote),
     ("true", SBool True),
     ("false", SBool False),
     ("car", wrap $ mkOp $ currying 1 $ unary car),
