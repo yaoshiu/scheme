@@ -69,7 +69,8 @@ bindAndEval params args expr = do
                     dispatch p $
                       fold
                         [ fold
-                            [quote, a]
+                            [quote, a],
+                          SNil
                         ]
                   bindAndEval ps as expr
               ]
@@ -89,7 +90,7 @@ vau params envParam expr = do
                 \ast -> do
                   local (const dynEnv) $ eval ast
     local (const env) $ do
-      _ <- dispatch envParam envOp
+      _ <- dispatch envParam $ fold [envOp, SNil]
       bindAndEval params args expr
 
 car :: SExpr -> Eval SExpr

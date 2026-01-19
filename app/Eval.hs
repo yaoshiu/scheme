@@ -42,7 +42,7 @@ renderVal _ (SNum n) = T.pack $ show n
 renderVal _ SNil = "()"
 renderVal _ (SBool True) = "true"
 renderVal _ (SBool False) = "false"
-renderVal _ (SSym s) = s
+renderVal render (SSym s) = (if render then "'" else "") <> s
 renderVal _ (SOp {}) = "#<operative>"
 renderVal render lst@(SPair l r) =
   case asString lst of
@@ -93,9 +93,9 @@ dispatch (SBool True) args = dispatch SNil args
 dispatch (SBool False) args = currying 2 (binary $ \_ f -> eval f) args
 dispatch (SSym name) args =
   currying
-    1
-    ( unary $
-        \expr -> do
+    2
+    ( binary $
+        \expr _ -> do
           val <- eval expr
           define name val
     )
