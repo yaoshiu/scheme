@@ -21,7 +21,8 @@ import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import SExpr (Env (..), Eval (..), Op (..), SExpr (..), unicodeSize)
+import Debug.Trace (trace)
+import SExpr (Env (..), Eval (..), Op (..), SExpr (..), fold, mkOp, opOnPair, unicodeSize)
 
 runEval :: Env -> Eval SExpr -> IO SExpr
 runEval env ev =
@@ -38,7 +39,7 @@ asString (SPair (SChar c) rest) =
 asString _ = Nothing
 
 renderVal :: Bool -> SExpr -> Text
-renderVal _ (SNum n) = T.pack $ show n
+renderVal _ (SNum n) = T.show n
 renderVal _ SNil = "()"
 renderVal _ (SBool True) = "true"
 renderVal _ (SBool False) = "false"
@@ -73,7 +74,12 @@ currying n handler stream = collect [] n stream
     collect acc 0 _ = handler (reverse acc)
     collect acc needed SNil = pure $ SOp $ Op $ \more -> collect acc needed more
     collect acc needed (SPair h t) = collect (h : acc) (needed - 1) t
-    collect acc needed atom = collect (atom : acc) (needed - 1) SNil
+    collect acc needed pair =
+      dispatch pair $
+        fold
+          [ mkOp $ \more -> collect acc needed more,
+            opOnPair $ \h t -> collect (h : acc) (needed - 1) t
+          ]
 
 unary :: (SExpr -> Eval SExpr) -> [SExpr] -> Eval SExpr
 unary f [x] = f x
@@ -109,10 +115,10 @@ dispatch (SNum num) args =
           EQ -> eval z
           GT -> do
             op <- eval p
-            dispatch op $ SNum (num - 1)
+            dispatch op $ fold [SNum (num - 1)]
           LT -> do
             op <- eval n
-            dispatch op $ SNum (abs num - 1)
+            dispatch op $ fold [SNum (abs num - 1)]
     )
     args
 dispatch p@(SPair {}) args =

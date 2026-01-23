@@ -7,7 +7,10 @@ module SExpr
     Op (..),
     Cell,
     unicodeSize,
-    quote
+    quote,
+    fold,
+    mkOp,
+    opOnPair,
   )
 where
 
@@ -68,6 +71,17 @@ newtype Eval a = Eval
 
 quote :: SExpr
 quote = SOp $ Op $ \ast -> pure $ case ast of
-    SNil -> quote
-    SPair l _ -> l
-    _ -> ast
+  SNil -> quote
+  SPair l _ -> l
+  _ -> ast
+
+fold :: [SExpr] -> SExpr
+fold = foldr SPair SNil
+
+mkOp :: (SExpr -> Eval SExpr) -> SExpr
+mkOp = SOp . Op
+
+opOnPair :: (SExpr -> SExpr -> Eval SExpr) -> SExpr
+opOnPair f = mkOp $ \args -> case args of
+  SPair l r -> f l r
+  _ -> pure SNil

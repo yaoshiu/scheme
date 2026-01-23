@@ -8,15 +8,7 @@ import Data.IORef (newIORef)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import Eval (currying, dispatch, eval, ternary, unary)
-import SExpr (Env (..), Eval, Op (..), SExpr (..), quote)
-
-mkOp :: (SExpr -> Eval SExpr) -> SExpr
-mkOp = SOp . Op
-
-opOnPair :: (SExpr -> SExpr -> Eval SExpr) -> SExpr
-opOnPair f = mkOp $ \args -> case args of
-  SPair l r -> f l r
-  _ -> pure SNil
+import SExpr (Env (..), Eval, SExpr (..), fold, mkOp, opOnPair, quote)
 
 mapP :: (SExpr -> Eval SExpr) -> SExpr -> Eval SExpr
 mapP _ SNil = pure SNil
@@ -41,9 +33,6 @@ wrap op =
         args' <- mapP eval args
         dispatch op args'
     )
-
-fold :: [SExpr] -> SExpr
-fold = foldr SPair SNil
 
 bindAndEval :: SExpr -> SExpr -> SExpr -> Eval SExpr
 bindAndEval params args expr = do
